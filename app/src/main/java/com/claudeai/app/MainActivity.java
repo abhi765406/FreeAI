@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
 import android.graphics.Color;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Message;
@@ -28,13 +29,19 @@ import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+
 /**
  * Claude AI - Android shell.
  *
- * Wraps the bundled claude.html interface in a WebView configured for the
- * Puter.js SDK:
+ * The interface HTML is bundled in assets but loaded through an
+ * https://localhost/ base URL: Puter.js refuses to run on file://
+ * pages, so the WebView is told the page lives on a secure origin.
+ *
+ * WebView configured for the Puter.js SDK:
  *  - JS + DOM storage (chat history)
- *  - file:// page can call https:// APIs (needed by Puter.js from assets)
  *  - third-party cookies (Puter sign-in)
  *  - window.open auth popup routed to a full-screen dialog WebView
  *  - JS dialogs (alert/confirm/prompt) forwarded to native dialogs
@@ -83,7 +90,26 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         setContentView(root);
-        web.loadUrl("file:///android_asset/claude.html");
+
+        // IMPORTANT: load through an https base URL. Puter.js blocks the
+        // file:// protocol entirely (warning + dead auth popup), so the
+        // bundled HTML is served with an https://localhost/ origin instead.
+        web.loadDataWithBaseURL("https://localhost/",
+                Uri.encode(readAsset("claude.html")), "text/html", "utf-8", null);
+    }
+
+    private String readAsset(String name) {
+        StringBuilder sb = new StringBuilder();
+        try {
+            InputStream is = getAssets().open(name);
+            BufferedReader reader = new BufferedReader(new InputStreamReader(is, "UTF-8"));
+            String line;
+            while ((line = reader.readLine()) != null) sb.append(line).append('\n');
+            reader.close();
+        } catch (Exception e) {
+            return "";
+        }
+        return sb.toString();
     }
 
     private void configure(WebView w) {
@@ -239,16 +265,36 @@ public class MainActivity extends Activity {
             if (Build.VERSION.SDK_INT >= 21) {
                 CookieManager.getInstance().setAcceptThirdPartyCookies(popup, true);
             }
+
+            final TextView popupStatus = new TextView(MainActivity.this);
+            popupStatus.setText("Connecting to Puter...");
+            popupStatus.setTextColor(0xFF666666);
+            popupStatus.setTextSize(14);
+            popupStatus.setGravity(Gravity.CENTER);
+
             popup.setWebViewClient(new WebViewClient() {
                 @Override
                 public boolean shouldOverrideUrlLoading(WebView v, String url) {
                     return false;
+                }
+
+                @Override
+                public void onPageFinished(WebView v, String url) {
+                    popupStatus.setVisibility(View.GONE);
+                }
+
+                @Override
+                public void onReceivedError(WebView v, int errorCode, String description, String failingUrl) {
+                    popupStatus.setVisibility(View.VISIBLE);
+                    popupStatus.setText("Connection failed.\nPlease check your internet and try again.");
                 }
             });
 
             final Dialog dialog = new Dialog(MainActivity.this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
             FrameLayout container = new FrameLayout(MainActivity.this);
             container.addView(popup, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            container.addView(popupStatus, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
             dialog.setContentView(container);
             dialog.setOnDismissListener(d -> popup.destroy());
