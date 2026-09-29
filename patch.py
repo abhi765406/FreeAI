@@ -136,6 +136,16 @@ rep("""                const filename = `claude-code.${extension}`;
 
 rep("<title>Claude Interface - Fully Functional</title>", "<title>Claude AI</title>")
 
+# 9. Explain the Android asset origin instead of warning about file://.
+rep("""                if (window.location.protocol === 'file:') {
+                    protocolNotice.innerHTML = '✅ <strong>File mode:</strong> Authentication should work perfectly here!';
+                    protocolNotice.style.color = '#22c55e';
+                } else if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {""",
+"""                if (window.location.hostname === 'appassets.androidplatform.net') {
+                    protocolNotice.innerHTML = '📱 <strong>Android mode:</strong> Secure WebView + Puter authentication enabled.';
+                    protocolNotice.style.color = '#22c55e';
+                } else if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {""")
+
 os.makedirs(os.path.dirname(dst), exist_ok=True)
 open(dst, "w", encoding="utf-8").write(h)
 print("OK ->", dst, len(h), "chars")
