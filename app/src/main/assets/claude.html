@@ -1385,7 +1385,7 @@ If you are running this from a local server (like localhost), the issue is almos
         function close() { sb.classList.remove('open'); backdrop.classList.remove('show'); }
         btn.addEventListener('click', function (e) {
             e.stopPropagation();
-            if (sb.classList.contains('open')) close(); else sb.classList.add('open'), backdrop.classList.add('show');
+            if (sb.classList.contains('open')) close(); else { sb.classList.add('open'); backdrop.classList.add('show'); }
         });
         backdrop.addEventListener('click', close);
         sb.addEventListener('click', function (e) {
