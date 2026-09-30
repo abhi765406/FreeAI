@@ -16,6 +16,7 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.webkit.CookieManager;
 import android.webkit.JsPromptResult;
+import android.webkit.ValueCallback;
 import android.webkit.JsResult;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebChromeClient;
@@ -64,6 +65,9 @@ public class MainActivity extends Activity {
     private ProgressBar progress;
     private View errorOverlay;
     private Dialog popupDialog;
+
+    private static final int REQ_FILE_CHOOSER = 1001;
+    private ValueCallback<Uri[]> filePathCallback;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -118,7 +122,7 @@ public class MainActivity extends Activity {
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
         s.setAllowFileAccess(false);
-        s.setAllowContentAccess(false);
+        s.setAllowContentAccess(true);
         s.setSupportZoom(false);
         s.setBuiltInZoomControls(false);
         s.setDisplayZoomControls(false);
@@ -295,6 +299,32 @@ public class MainActivity extends Activity {
         }
 
         @Override
+        public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback,
+                                         FileChooserParams params) {
+            // Only one chooser at a time: cancel any pending request first.
+            if (filePathCallback != null) {
+                filePathCallback.onReceiveValue(null);
+                filePathCallback = null;
+            }
+            filePathCallback = callback;
+
+            Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("*/*");
+            boolean multiple = params != null
+                    && params.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE;
+            intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, multiple);
+            try {
+                startActivityForResult(Intent.createChooser(intent, "Attach files"), REQ_FILE_CHOOSER);
+            } catch (Exception e) {
+                filePathCallback = null;
+                callback.onReceiveValue(null);
+                return false;
+            }
+            return true;
+        }
+
+        @Override
         public boolean onJsAlert(WebView view, String url, String message, final JsResult result) {
             new AlertDialog.Builder(MainActivity.this)
                     .setMessage(message)
@@ -425,12 +455,29 @@ public class MainActivity extends Activity {
                 .show();
     }
 
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == REQ_FILE_CHOOSER) {
+            if (filePathCallback != null) {
+                Uri[] result = WebChromeClient.FileChooserParams.parseResult(resultCode, data);
+                filePathCallback.onReceiveValue(result);
+                filePathCallback = null;
+            }
+            return;
+        }
+        super.onActivityResult(requestCode, resultCode, data);
+    }
+
     @Override protected void onPause()  { super.onPause();  if (web != null) web.onPause(); }
     @Override protected void onResume() { super.onResume(); if (web != null) web.onResume(); }
 
     @Override
     protected void onDestroy() {
         closePopup();
+        if (filePathCallback != null) {
+            filePathCallback.onReceiveValue(null);
+            filePathCallback = null;
+        }
         if (web != null) {
             ViewGroup parent = (ViewGroup) web.getParent();
             if (parent != null) parent.removeView(web);
