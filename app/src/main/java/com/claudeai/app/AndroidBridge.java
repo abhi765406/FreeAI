@@ -12,14 +12,10 @@ import android.widget.Toast;
 import java.io.File;
 import java.io.FileOutputStream;
 
-/**
- * Bridge exposed to the WebView as window.AndroidBridge.
- * Lets the page copy code and save artifact files without
- * WebView clipboard/blob limitations.
- */
+/** JS bridge: copy code to clipboard and save code files from the chat UI. */
 public class AndroidBridge {
-    private final Activity activity;
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Activity activity;
 
     public AndroidBridge(Activity activity) {
         this.activity = activity;
@@ -27,33 +23,35 @@ public class AndroidBridge {
 
     @JavascriptInterface
     public void copyText(final String text) {
-        handler.post(() -> {
-            try {
-                ClipboardManager cm = (ClipboardManager)
-                        activity.getSystemService(Context.CLIPBOARD_SERVICE);
-                cm.setPrimaryClip(ClipData.newPlainText("code", text));
-                Toast.makeText(activity, "Copied to clipboard", Toast.LENGTH_SHORT).show();
-            } catch (Exception e) {
-                Toast.makeText(activity, "Copy failed", Toast.LENGTH_SHORT).show();
+        handler.post(new Runnable() {
+            @Override public void run() {
+                try {
+                    ClipboardManager cm = (ClipboardManager) activity.getSystemService(Context.CLIPBOARD_SERVICE);
+                    cm.setPrimaryClip(ClipData.newPlainText("code", text));
+                    Toast.makeText(activity, "Copied to clipboard", Toast.LENGTH_SHORT).show();
+                } catch (Exception e) {
+                    Toast.makeText(activity, "Copy failed", Toast.LENGTH_SHORT).show();
+                }
             }
         });
     }
 
     @JavascriptInterface
-    public void saveFile(final String name, final String content) {
-        handler.post(() -> {
-            try {
-                // getExternalFilesDir needs NO permission on any Android version
-                File dir = activity.getExternalFilesDir(null);
-                if (dir == null) dir = activity.getFilesDir();
-                if (!dir.exists()) dir.mkdirs();
-                File f = new File(dir, uniqueName(dir, name));
-                FileOutputStream fos = new FileOutputStream(f);
-                fos.write(content.getBytes("UTF-8"));
-                fos.close();
-                Toast.makeText(activity, "Saved: " + f.getAbsolutePath(), Toast.LENGTH_LONG).show();
-            } catch (Exception e) {
-                Toast.makeText(activity, "Save failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+    public void saveFile(final String filename, final String content) {
+        handler.post(new Runnable() {
+            @Override public void run() {
+                try {
+                    File dir = activity.getExternalFilesDir(null);
+                    if (dir == null) dir = activity.getFilesDir();
+                    if (!dir.exists()) dir.mkdirs();
+                    File out = new File(dir, uniqueName(dir, filename));
+                    FileOutputStream fos = new FileOutputStream(out);
+                    fos.write(content.getBytes("UTF-8"));
+                    fos.close();
+                    Toast.makeText(activity, "Saved: " + out.getAbsolutePath(), Toast.LENGTH_LONG).show();
+                } catch (Exception e) {
+                    Toast.makeText(activity, "Save failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                }
             }
         });
     }
