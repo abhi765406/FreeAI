@@ -17,12 +17,14 @@
             background-color: #1a1a1a;
             color: #e5e5e5;
             height: 100vh;
+            height: 100dvh;
             overflow: hidden;
         }
 
         .container {
             display: flex;
             height: 100vh;
+            height: 100dvh;
         }
 
         /* Sidebar */
@@ -198,6 +200,8 @@
         /* Main Content */
         .main-content {
             flex: 1;
+            min-width: 0;
+            min-height: 0;
             display: flex;
             flex-direction: column;
             background-color: #1a1a1a;
@@ -205,6 +209,7 @@
 
         .content-area {
             flex: 1;
+            min-height: 0;
             display: flex;
             flex-direction: column;
             padding: 20px;
@@ -226,8 +231,8 @@
         .chat-container {
             display: none;
             flex-direction: column;
-            height: 100vh;
-            max-height: 100vh;
+            flex: 1;
+            min-height: 0;
             overflow: hidden;
         }
 
@@ -241,7 +246,6 @@
             overflow-x: hidden;
             padding: 20px;
             margin-bottom: 20px;
-            height: calc(100vh - 200px);
             min-height: 0;
             scrollbar-width: thin;
             scrollbar-color: #404040 #262626;
@@ -712,7 +716,7 @@
                     <div class="search-container">
                         <textarea class="search-input" id="welcomeInput" placeholder="How can I help you today?" rows="1"></textarea>
                         <div class="search-actions">
-                            <button class="search-btn" id="researchBtn" type="button">Research</button>
+                            <button class="search-btn" id="researchBtn">Research</button>
                             <button class="send-btn" id="sendBtn">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                                     <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
@@ -817,9 +821,10 @@
     <script>
         // Global state
         const availableModels = [
-            { apiName: 'claude-sonnet-4', displayName: 'Claude Sonnet 4', shortName: 'Sonnet 4' },
-            { apiName: 'claude-opus-4', displayName: 'Claude Opus 4', shortName: 'Opus 4' },
-            { apiName: 'claude-3-7-sonnet', displayName: 'Claude 3.7 Sonnet', shortName: 'Sonnet 3.7' }
+            { apiName: 'claude-sonnet-5',   displayName: 'Claude Sonnet 5',   shortName: 'Sonnet 5' },
+            { apiName: 'claude-opus-5-5',   displayName: 'Claude Opus 5.5',   shortName: 'Opus 5.5' },
+            { apiName: 'claude-haiku-4-5',  displayName: 'Claude Haiku 4.5',  shortName: 'Haiku 4.5' },
+            { apiName: 'claude-sonnet-4-6', displayName: 'Claude Sonnet 4.6', shortName: 'Sonnet 4.6' }
         ];
         let currentModel = availableModels[0].apiName;
         let chatHistory = [];
@@ -836,93 +841,85 @@
         });
 
         function updateProtocolNotice() {
-            const protocolNotice = document.getElementById('protocolNotice');
-            if (protocolNotice) {
-                if (window.location.hostname === 'appassets.androidplatform.net') {
-                    protocolNotice.innerHTML = '📱 <strong>Android mode:</strong> Secure WebView + Puter authentication enabled.';
-                    protocolNotice.style.color = '#22c55e';
-                } else if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-                    protocolNotice.innerHTML = '⚠️ <strong>Server mode:</strong> If auth fails, browser profile issues are likely. See guide below.';
-                    protocolNotice.style.color = '#f59e0b';
-                } else {
-                    protocolNotice.innerHTML = '🌐 <strong>Web mode:</strong> Make sure popups are allowed for this domain.';
-                    protocolNotice.style.color = '#3b82f6';
-                }
+            const n = document.getElementById('protocolNotice');
+            if (!n) return;
+            let signedIn = false;
+            try { signedIn = typeof puter !== 'undefined' && puter.auth && puter.auth.isSignedIn(); } catch (e) {}
+            if (typeof puter === 'undefined') {
+                n.innerHTML = '\u26a0\ufe0f <strong>Puter.js did not load.</strong> Check your internet connection and restart the app.';
+                n.style.color = '#f59e0b';
+            } else if (signedIn) {
+                n.innerHTML = '\u2705 <strong>Signed in to Puter.</strong>';
+                n.style.color = '#22c55e';
+            } else {
+                n.innerHTML = 'Tap the button below and finish signing in to Puter in the window that opens.';
+                n.style.color = '#b3b3b3';
             }
+        }
+
+        function extractError(e) {
+            if (!e) return 'Unknown error.';
+            if (typeof e === 'string') return e;
+            if (typeof e.message === 'string' && e.message) return e.message;
+            if (typeof e.msg === 'string' && e.msg) return e.msg;
+            if (e.error) {
+                if (typeof e.error === 'string') return e.error;
+                if (e.error.message) return e.error.message;
+            }
+            try { return JSON.stringify(e); } catch (_) { return String(e); }
+        }
+
+        function showBanner(text) {
+            let b = document.getElementById('errBanner');
+            if (!b) {
+                b = document.createElement('div');
+                b.id = 'errBanner';
+                b.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:9999;background:#7f1d1d;color:#fff;padding:10px 12px;border-radius:8px;font-size:12px;line-height:1.4;max-height:30vh;overflow:auto;';
+                b.addEventListener('click', () => b.remove());
+                document.body.appendChild(b);
+            }
+            b.textContent = text + '  (tap to dismiss)';
+        }
+        window.addEventListener('error', e => showBanner('Script error: ' + (e.message || 'unknown')));
+        window.addEventListener('unhandledrejection', e => showBanner('Error: ' + extractError(e.reason)));
+
+        async function ensureSignedIn() {
+            if (typeof puter === 'undefined') {
+                throw new Error('Puter.js failed to load. Check your internet connection and restart the app.');
+            }
+            try {
+                if (puter.auth && typeof puter.auth.isSignedIn === 'function' && puter.auth.isSignedIn()) return;
+            } catch (e) {}
+            await puter.auth.signIn();
         }
 
         async function handleManualAuth() {
             const authButton = document.getElementById('authButton');
-            
             try {
+                if (authButton) { authButton.textContent = '\ud83d\udd04 Waiting for sign-in...'; authButton.disabled = true; }
+                await ensureSignedIn();
                 if (authButton) {
-                    authButton.textContent = '🔄 Authenticating...';
-                    authButton.disabled = true;
+                    authButton.textContent = '\u2705 Signed in';
+                    authButton.style.backgroundColor = '#22c55e';
+                    setTimeout(() => {
+                        const box = authButton.closest('div[style*="max-width: 600px"]');
+                        if (box) box.style.display = 'none';
+                    }, 1500);
                 }
-                
-                console.log('🔐 Manually triggering Puter authentication...');
-                
-                // Trigger authentication with a simple test call
-                const authResponse = await puter.ai.chat("test", {model: 'claude-sonnet-4'});
-                
-                console.log('✅ Raw auth response:', authResponse);
-
-                // Check for a successful response structure
-                if (authResponse && ((authResponse.message && authResponse.message.content) || authResponse.success !== false)) {
-                     console.log('✅ Authentication successful!');
-                    if (authButton) {
-                        authButton.textContent = '✅ Authenticated';
-                        authButton.style.backgroundColor = '#22c55e';
-                        setTimeout(() => {
-                           const authBox = authButton.closest('div[style*="max-width: 600px"]');
-                           if(authBox) authBox.style.display = 'none';
-                        }, 2000);
-                    }
-                } else {
-                    throw new Error('Authentication response indicates failure.');
-                }
-                
+                updateProtocolNotice();
             } catch (error) {
-                console.error('❌ Manual authentication failed:', error);
-                
+                console.error('Sign-in failed:', error);
                 if (authButton) {
-                    authButton.textContent = '❌ Auth Failed - Try Guide';
+                    authButton.textContent = '\u274c Sign-in failed - tap to retry';
                     authButton.disabled = false;
                     authButton.style.backgroundColor = '#dc2626';
                 }
-                
-                // --- ENHANCED ERROR MESSAGE ---
-                const troubleshootGuide = `
-⚠️ AUTHENTICATION FAILED!
-
-This usually happens because of your browser profile settings (extensions, cache, etc.), NOT a bug in the code.
-
-As you noticed, it works in a new Guest or Incognito profile. Here is how to fix it in your MAIN profile:
-
---- TROUBLESHOOTING GUIDE ---
-
-✅ QUICKEST FIX (TRY FIRST):
-1.  🥷 Use Incognito/Private Mode:
-    • Press Ctrl+Shift+N (Chrome/Edge) or Ctrl+Shift+P (Firefox).
-    • Open this HTML file there. This is the fastest workaround.
-
-🔧 TO FIX YOUR MAIN PROFILE (TRY IN ORDER):
-2.  🔌 Disable Extensions:
-    • Go to your browser's extensions page (e.g., chrome://extensions).
-    • TEMPORARILY disable ALL extensions, especially ad-blockers (uBlock, AdBlock) and privacy blockers.
-    • Refresh this page and try authenticating again.
-
-3.  🧹 Clear Site Data for Puter:
-    • Go to puter.com, click the 🔒 icon in the address bar -> Site Settings/Cookies and site data -> Delete data.
-    • Refresh this page and try again.
-
-4.  🍪 Allow Third-Party Cookies:
-    • Go to your browser's cookie settings (e.g., chrome://settings/cookies).
-    • Ensure "Block third-party cookies" is NOT enabled, or add "[*.]puter.com" to the allowed list.
-
-If you are running this from a local server (like localhost), the issue is almost certainly extensions or cookie settings.
-`;
-                alert(troubleshootGuide);
+                const n = document.getElementById('protocolNotice');
+                if (n) {
+                    n.textContent = 'Sign-in did not complete: ' + extractError(error) +
+                        '. Make sure you are online, then tap the button again and finish signing in.';
+                    n.style.color = '#f87171';
+                }
             }
         }
 
@@ -935,22 +932,8 @@ If you are running this from a local server (like localhost), the issue is almos
             const actionBtns = document.querySelectorAll('.action-btn');
             const modelSelectors = document.querySelectorAll('#modelSelector, #chatModelSelector');
             const authButton = document.getElementById('authButton');
-            const researchBtn = document.getElementById('researchBtn');
 
             if (authButton) authButton.addEventListener('click', handleManualAuth);
-            if (researchBtn) {
-                researchBtn.addEventListener('click', function() {
-                    if (welcomeInput) {
-                        const query = welcomeInput.value.trim();
-                        if (!query) {
-                            welcomeInput.focus();
-                            return;
-                        }
-                        welcomeInput.value = 'Research this topic and give me a clear, sourced explanation: ' + query;
-                        handleWelcomeMessage();
-                    }
-                });
-            }
 
             [welcomeInput, chatInput].forEach(textarea => {
                 if (textarea) {
@@ -1113,9 +1096,13 @@ If you are running this from a local server (like localhost), the issue is almos
         }
 
         function handleStreamPart(part, onText) {
-            if (part && part.text) { onText(part.text); return; }
+            if (part == null) return;
             if (typeof part === 'string') { onText(part); return; }
-            if (part && part.value && part.value.text) { onText(part.value.text); }
+            if (typeof part.text === 'string') { onText(part.text); return; }
+            if (part.value && typeof part.value.text === 'string') { onText(part.value.text); return; }
+            const c = part.message && part.message.content;
+            if (typeof c === 'string') { onText(c); return; }
+            if (Array.isArray(c)) { c.forEach(x => { if (x && typeof x.text === 'string') onText(x.text); }); }
         }
         async function readStreamParts(response, onText) {
             if (response && typeof response.getReader === 'function') {
@@ -1136,55 +1123,53 @@ If you are running this from a local server (like localhost), the issue is almos
         }
         async function sendMessage(message) {
             if (isStreaming) return;
-            
-            console.log('🚀 Starting to send message...');
+
             addMessage(message, 'user');
             showTypingIndicator();
             setInputState(false);
 
             chatHistory.push({ role: 'user', content: message });
-            
+
             try {
                 isStreaming = true;
-                if (typeof puter === 'undefined') { throw new Error('Puter.js is not available.'); }
-                console.log('📡 Calling Puter AI with model:', currentModel, 'and full history.');
-                
+                await ensureSignedIn();
+                updateProtocolNotice();
+
                 const response = await puter.ai.chat(chatHistory, {
                     model: currentModel,
                     stream: true
                 });
 
                 if (response && response.success === false) {
-                    throw new Error('Authentication required. Please click the authenticate button and allow the popup.');
+                    throw new Error(extractError(response));
                 }
-                
+
                 const { messageContent } = addMessage('', 'assistant');
                 hideTypingIndicator();
                 let fullResponse = '';
-                
+
                 await readStreamParts(response, function (text) {
                     fullResponse += text;
                     renderFormattedMessage(fullResponse, messageContent);
                     scrollToBottom();
                 });
-                
-                console.log('✅ Streaming complete.');
-                renderFormattedMessage(fullResponse, messageContent); 
-                
+
+                if (!fullResponse) {
+                    throw new Error('The model returned an empty reply. Try again or switch model.');
+                }
+                renderFormattedMessage(fullResponse, messageContent);
+
                 chatHistory.push({ role: 'assistant', content: fullResponse });
                 updateCurrentConversation();
-                
+
             } catch (error) {
-                console.error('❌ Error in sendMessage:', error);
+                console.error('Error in sendMessage:', error);
                 hideTypingIndicator();
-                addMessage('Sorry, I encountered an error: ' + (error.message || 'Unknown error.'), 'assistant', true);
-                
-                // FIX: The API call failed, so the optimistic user message added to the history
-                // resulted in an invalid state. Remove it to allow the user to try again.
+                addMessage('Sorry, I encountered an error: ' + extractError(error), 'assistant', true);
+                // Drop the failed user turn so the next attempt starts from a valid history.
                 if (chatHistory.length > 0 && chatHistory[chatHistory.length - 1].role === 'user') {
                     chatHistory.pop();
                 }
-
             } finally {
                 isStreaming = false;
                 setInputState(true);
