@@ -37,3 +37,14 @@ Limits: 8 files per message, PDF 25 MB, zip 60 MB, long text is truncated.
 - **Saved chats:** stored on the phone, survive closing the app, delete with the x in the side menu (last 50 chats).
 - **Documents:** ask for a Word / Excel / PDF file. Word and Excel are generated in the app. PDF opens Android's print dialog: choose "Save as PDF".
 - Back button closes full-screen preview / side menu before leaving the app.
+
+## v1.4: more models (Claude is untouched and stays the default)
+Tap the model name above the message box to open the picker.
+- **Claude** (4 models): uses your Puter credits, as before.
+- **Free & fast, your own API key** (does NOT use Puter credits): OpenRouter free models, Groq, Cerebras, or any OpenAI-compatible service. Add a key once; the list of models is loaded live.
+  - OpenRouter: openrouter.ai/keys. Free models: 20 requests/min, 50/day (1,000/day after a one-time $10 top-up).
+  - Groq: console.groq.com/keys. Free plan, per-model limits (about 30 requests/min plus a daily token cap).
+- **Open-source via Puter**: live list with prices per 1M tokens. Uses Puter credits (cheaper than Claude).
+Your last picked model is remembered for new chats. Pick a Claude model to go back.
+Limits of non-Claude models here: no web search, no PDF reading; images only on vision-capable models.
+API keys are stored only on the phone (plain text in app storage).
