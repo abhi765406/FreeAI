@@ -696,6 +696,25 @@
         .recent-item .t { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .recent-item .del { background: none; border: none; color: #777; cursor: pointer; font-size: 14px; padding: 2px 6px; }
         .recent-item .del:hover { color: #ff6b6b; }
+
+        /* ---- Model picker (v1.4) ---- */
+        .mp-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 4000; background: rgba(0,0,0,.6); display: flex; align-items: flex-end; }
+        .mp-sheet { background: #1f1f1f; width: 100%; max-height: 88vh; border-radius: 16px 16px 0 0; display: flex; flex-direction: column; color: #e5e5e5; padding-bottom: env(safe-area-inset-bottom, 0px); }
+        .mp-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; font-size: 16px; font-weight: 600; }
+        .mp-search { margin: 0 16px 8px; padding: 10px 12px; background: #2a2a2a; border: 1px solid #404040; border-radius: 10px; color: #fff; font-size: 14px; outline: none; }
+        .mp-body { overflow-y: auto; padding: 0 8px 16px; }
+        .mp-sec { padding: 14px 8px 6px; font-size: 11px; color: #9a9a9a; text-transform: uppercase; letter-spacing: .05em; }
+        .mp-note { padding: 2px 8px 8px; font-size: 12px; color: #8a8a8a; line-height: 1.4; }
+        .mp-prov { margin: 0 0 6px; }
+        .mp-prov-top { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; }
+        .mp-prov-top .pn { font-size: 14px; font-weight: 600; }
+        .mp-prov-top .pb { display: flex; gap: 6px; }
+        .mp-row { display: flex; flex-direction: column; align-items: flex-start; width: 100%; background: none; border: 1px solid transparent; color: #e5e5e5; text-align: left; padding: 9px 12px; border-radius: 10px; cursor: pointer; font-size: 14px; }
+        .mp-row:hover { background: #2a2a2a; }
+        .mp-row.sel { background: #33261f; border-color: #ff6b35; }
+        .mp-row .nm { word-break: break-word; }
+        .mp-row .meta { font-size: 11px; color: #8a8a8a; margin-top: 2px; word-break: break-all; }
+        .mp-prov > .artifact-btn { margin: 0 8px 8px; }
     </style>
 </head>
 <body>
@@ -1050,22 +1069,8 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             console.log('✅ Interface initialized');
         }
 
-        function updateModelDisplay() {
-            const model = availableModels.find(m => m.apiName === currentModel);
-            if (!model) {
-                console.error("Model not found in available models:", currentModel);
-                return;
-            }
-            document.getElementById('currentModel').textContent = model.displayName;
-            document.getElementById('chatCurrentModel').textContent = model.shortName;
-        }
-
         function toggleModel() {
-            const currentIndex = availableModels.findIndex(m => m.apiName === currentModel);
-            const nextIndex = (currentIndex + 1) % availableModels.length;
-            currentModel = availableModels[nextIndex].apiName;
-            updateModelDisplay();
-            console.log('🔄 Model switched to:', availableModels[nextIndex].displayName);
+            openModelPicker();
         }
 
         async function handleWelcomeMessage() {
@@ -1146,7 +1151,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             if (!conversation) return;
             currentConversationId = conversationId;
             chatHistory = [...conversation.messages];
-            if (availableModels.some(m => m.apiName === conversation.model)) currentModel = conversation.model;
+            if (conversation.model) currentModel = conversation.model;
             updateModelDisplay();
             switchToChatView();
             const chatMessages = document.getElementById('chatMessages');
@@ -1174,7 +1179,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             renderAttachmentChips();
             
             // --- BUG FIX: Reset model to default on new chat ---
-            currentModel = availableModels[0].apiName;
+            currentModel = defaultModelId();
             updateModelDisplay();
             
             const welcomeScreen = document.getElementById('welcomeScreen');
@@ -1260,7 +1265,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
             const streamOnce = async function (msgs, withTools) {
                 const options = { model: currentModel, stream: true };
                 if (withTools) options.tools = [SEARCH_TOOL];
-                const response = await puter.ai.chat(msgs, options);
+                const response = await callModel(msgs, options);
                 if (response && response.success === false) throw new Error(extractError(response));
                 const calls = [];
                 roundText = '';
@@ -1272,7 +1277,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
                 const msgs = buildApiMessages();
                 for (let round = 0; round < 4; round++) {
                     if (round > 0 && fullResponse && !/\n$/.test(fullResponse)) fullResponse += '\n\n';
-                    const calls = await streamOnce(msgs, withSearch && round < 3);
+                    const calls = await streamOnce(msgs, withSearch && round < 3 && !isExt(currentModel));
                     if (!calls.length) break;
                     msgs.push({
                         role: 'assistant',
@@ -1311,13 +1316,12 @@ https://github.com/nodeca/pako/blob/main/LICENSE
 
             try {
                 isStreaming = true;
-                await ensureSignedIn();
-                updateProtocolNotice();
+                if (!isExt(currentModel)) { await ensureSignedIn(); updateProtocolNotice(); }
                 await Promise.all(atts.map(a => a.ready));
 
                 userEntry = {
                     role: 'user',
-                    content: await buildUserContent(message, atts, 'inline'),
+                    content: await buildUserContent(message, atts, isExt(currentModel) ? 'ext' : 'inline'),
                     text: message,
                     attachments: atts.map(uiMeta)
                 };
@@ -1327,7 +1331,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
                     await runAttempt();
                 } catch (firstError) {
                     // Images sent inline were rejected before any text arrived: retry once via Puter storage.
-                    if (!fullResponse && atts.some(a => a.kind === 'image')) {
+                    if (!fullResponse && !isExt(currentModel) && atts.some(a => a.kind === 'image')) {
                         userEntry.content = await buildUserContent(message, atts, 'upload');
                         await runAttempt();
                     } else {
@@ -1343,7 +1347,11 @@ https://github.com/nodeca/pako/blob/main/LICENSE
                 console.error('Error in sendMessage:', error);
                 hideTypingIndicator();
                 resetStatus();
-                addMessage('Sorry, I encountered an error: ' + extractError(error), 'assistant', true);
+                let errText = extractError(error);
+                if (!isExt(currentModel) && /insufficient|\b402\b|credit|funds/i.test(errText)) {
+                    errText += '\n\nYour Puter credits look used up. Tap the model name and choose a free model (OpenRouter or Groq) to keep chatting.';
+                }
+                addMessage('Sorry, I encountered an error: ' + errText, 'assistant', true);
                 if (userEntry) {
                     const i = chatHistory.indexOf(userEntry);
                     if (i !== -1) chatHistory.splice(i, 1);
@@ -1688,8 +1696,12 @@ async function buildUserContent(text, atts, imageMode) {
                 media.push({ type: 'image_url', image_url: { url: a.dataUrl } });
             }
         } else if (a.kind === 'pdf') {
-            if (!a.puterPath) a.puterPath = await uploadToPuter(a.blob, a.name);
-            media.push({ type: 'file', puter_path: a.puterPath });
+            if (imageMode === 'ext') {
+                t += '\n\n[A PDF named "' + a.name + '" was attached, but this model cannot read PDFs. Use a Claude model for PDFs.]';
+            } else {
+                if (!a.puterPath) a.puterPath = await uploadToPuter(a.blob, a.name);
+                media.push({ type: 'file', puter_path: a.puterPath });
+            }
         }
     }
     if (!media.length) return t;
@@ -2496,6 +2508,323 @@ document.addEventListener('DOMContentLoaded', function () {
         const el = document.getElementById(id);
         if (el) el.addEventListener('click', () => setWebSearch(!webSearchOn));
     });
+});
+
+    </script>
+    <script>
+// ======================= Multi-model picker (v1.4) =======================
+// Claude stays the default. Adds: open-source models via Puter (cheaper credits) and
+// free providers with the user's own API key (OpenRouter free models, Groq, Cerebras, custom).
+
+const MODELS_KEY = 'claude_app_models_v1';
+const KEYS_KEY = 'claude_app_keys_v1';
+const PROVIDERS = {
+    openrouter: { name: 'OpenRouter', base: 'https://openrouter.ai/api/v1', keyUrl: 'openrouter.ai/keys',
+        note: 'Free models ($0). Limits: 20 requests/min and 50/day (1,000/day after a one-time $10 top-up). The list changes over time.' },
+    groq: { name: 'Groq', base: 'https://api.groq.com/openai/v1', keyUrl: 'console.groq.com/keys',
+        note: 'Very fast open models, free plan with no card. Limits are per model: about 30 requests/min and a daily token cap.' },
+    cerebras: { name: 'Cerebras', base: 'https://api.cerebras.ai/v1', keyUrl: 'cloud.cerebras.ai',
+        note: 'Very fast open models with a free tier. Limits are shown in your Cerebras account.' },
+    custom: { name: 'Custom', base: '', keyUrl: '',
+        note: 'Any OpenAI-compatible service (Together, Fireworks...). Needs an https base URL ending in /v1.' }
+};
+const OPEN_RE = /llama|qwen|deepseek|mistral|mixtral|gemma|gpt-oss|kimi|glm|minimax|nemotron|phi-|olmo|granite|hermes|command-r|yi-|solar|internlm|ernie|exaone/i;
+const NOT_CHAT_RE = /whisper|tts|embed|moderation|rerank|guard|playai|image|diffusion|speech|transcri|ocr/i;
+
+let modelPrefs = { labels: {}, last: '' };
+let providerKeys = {};
+const mp = { open: false, query: '', puter: null, puterLoading: false, puterError: '', lists: {}, loading: {}, errors: {} };
+let mpEl = null;
+
+function loadModelPrefs() {
+    try { const p = JSON.parse(localGet(MODELS_KEY) || '{}'); if (p && typeof p === 'object') modelPrefs = { labels: p.labels || {}, last: p.last || '' }; } catch (e) {}
+    try { providerKeys = JSON.parse(localGet(KEYS_KEY) || '{}') || {}; } catch (e) { providerKeys = {}; }
+}
+function saveModelPrefs() { localSet(MODELS_KEY, JSON.stringify(modelPrefs)); }
+function saveKeys() { localSet(KEYS_KEY, JSON.stringify(providerKeys)); }
+function getKey(pid) { return pid === 'custom' ? ((providerKeys.custom || {}).key || '') : (providerKeys[pid] || ''); }
+function providerBase(pid) { return pid === 'custom' ? ((providerKeys.custom || {}).base || '').replace(/\/+$/, '') : PROVIDERS[pid].base; }
+
+function isExt(id) { return typeof id === 'string' && id.indexOf('ext:') === 0; }
+function parseExt(id) {
+    const rest = id.slice(4), i = rest.indexOf(':');
+    return { pid: rest.slice(0, i), id: rest.slice(i + 1) };
+}
+function modelLabel(id) {
+    const m = availableModels.find(x => x.apiName === id);
+    if (m) return m.displayName;
+    if (modelPrefs.labels[id]) return modelPrefs.labels[id];
+    return isExt(id) ? parseExt(id).id : id;
+}
+function shortModelLabel(label) { return label.length > 16 ? label.slice(0, 15) + '\u2026' : label; }
+function defaultModelId() { return modelPrefs.last || availableModels[0].apiName; }
+
+function updateModelDisplay() {
+    const m = availableModels.find(x => x.apiName === currentModel);
+    const full = m ? m.displayName : modelLabel(currentModel);
+    const short = m ? m.shortName : shortModelLabel(full);
+    const a = document.getElementById('currentModel'), b = document.getElementById('chatCurrentModel');
+    if (a) a.textContent = full;
+    if (b) b.textContent = short;
+}
+function selectModel(id, label) {
+    currentModel = id;
+    if (label) modelPrefs.labels[id] = label;
+    modelPrefs.last = (id === availableModels[0].apiName) ? '' : id;
+    saveModelPrefs();
+    updateModelDisplay();
+    closeModelPicker();
+}
+
+// ---------------------------------------------------------------- listing models
+function perMillion(cents, tokens) { return (Number(cents) || 0) / 100 * 1e6 / (Number(tokens) || 1e6); }
+function money(n) { return n === 0 ? 'free' : '$' + (n < 0.1 ? n.toFixed(3) : n.toFixed(2)); }
+async function loadPuterOpenModels() {
+    if (typeof puter === 'undefined' || !puter.ai || !puter.ai.listModels) throw new Error('Puter is not available.');
+    const all = await puter.ai.listModels();
+    const seen = new Set();
+    const out = [];
+    (all || []).forEach(m => {
+        const id = m && m.id;
+        if (!id || seen.has(id)) return;
+        const text = id + ' ' + (m.name || '');
+        if (!OPEN_RE.test(text) || NOT_CHAT_RE.test(text)) return;
+        seen.add(id);
+        const c = m.cost || {};
+        out.push({ id: id, name: m.name || id, ctx: m.context, inM: perMillion(c.input, c.tokens), outM: perMillion(c.output, c.tokens), hasCost: !!m.cost });
+    });
+    out.sort((a, b) => (a.outM - b.outM) || a.name.localeCompare(b.name));
+    return out;
+}
+async function httpErrorText(r, pname) {
+    let body = '';
+    try { body = await r.text(); } catch (e) {}
+    let msg = body;
+    try { const j = JSON.parse(body); msg = (j.error && (j.error.message || j.error)) || j.message || body; } catch (e) {}
+    if (typeof msg !== 'string') msg = JSON.stringify(msg);
+    if (r.status === 401 || r.status === 403) return pname + ' rejected the API key (' + r.status + '). Check it in the model menu.';
+    if (r.status === 429) return pname + ' rate limit reached. Free models allow only a limited number of requests per minute/day. Wait a bit or pick another model. ' + msg.slice(0, 160);
+    if (r.status === 402) return pname + ' says payment/credit is required (402). ' + msg.slice(0, 160);
+    return pname + ' error ' + r.status + ': ' + msg.slice(0, 200);
+}
+async function fetchProviderModels(pid) {
+    const base = providerBase(pid), key = getKey(pid);
+    if (!base) throw new Error('Set the base URL first.');
+    if (!key && pid !== 'openrouter') throw new Error('Add your API key first.');
+    let r;
+    try { r = await fetch(base + '/models', { headers: key ? { Authorization: 'Bearer ' + key } : {} }); }
+    catch (e) { throw new Error('Could not reach ' + PROVIDERS[pid].name + ' (' + extractError(e) + '). Check your connection.'); }
+    if (!r.ok) throw new Error(await httpErrorText(r, PROVIDERS[pid].name));
+    const j = await r.json();
+    let list = (j.data || j.models || []).map(m => ({
+        id: m.id || m.name, name: m.name || m.id, ctx: m.context_length || m.context_window,
+        pricing: m.pricing, arch: m.architecture
+    })).filter(m => m.id && !NOT_CHAT_RE.test(m.id));
+    if (pid === 'openrouter') {
+        list = list.filter(m => /:free$/.test(m.id) && (!m.pricing || (Number(m.pricing.prompt) === 0 && Number(m.pricing.completion) === 0)) &&
+            (!m.arch || !m.arch.output_modalities || m.arch.output_modalities.indexOf('text') !== -1));
+    }
+    list.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    return list;
+}
+
+// ---------------------------------------------------------------- calling external models
+function toOpenAIMessages(msgs) {
+    return msgs.filter(m => m.role === 'system' || m.role === 'user' || m.role === 'assistant').map(m => {
+        if (typeof m.content === 'string') return { role: m.role, content: m.content };
+        if (!Array.isArray(m.content)) return { role: m.role, content: String(m.content || '') };
+        const parts = []; let note = '';
+        m.content.forEach(c => {
+            if (!c) return;
+            if (c.type === 'text') parts.push({ type: 'text', text: c.text });
+            else if (c.type === 'image_url') parts.push(c);
+            else if (c.type === 'file') note += '\n[A file was attached earlier but this model cannot read it. Use a Claude model for PDFs.]';
+        });
+        if (note) parts.push({ type: 'text', text: note });
+        if (!parts.some(p => p.type === 'image_url')) return { role: m.role, content: parts.map(p => p.text).join('') };
+        return { role: m.role, content: parts };
+    });
+}
+async function* streamExternal(pid, modelId, msgs) {
+    const name = PROVIDERS[pid].name, base = providerBase(pid), key = getKey(pid);
+    if (!base) throw new Error('Set the base URL for ' + name + ' in the model menu.');
+    if (!key && pid !== 'custom') throw new Error('Add your ' + name + ' API key: tap the model name, then ' + name + '.');
+    let r;
+    try {
+        r = await fetch(base + '/chat/completions', {
+            method: 'POST',
+            headers: Object.assign({ 'Content-Type': 'application/json' }, key ? { Authorization: 'Bearer ' + key } : {}),
+            body: JSON.stringify({ model: modelId, messages: toOpenAIMessages(msgs), stream: true })
+        });
+    } catch (e) { throw new Error('Could not reach ' + name + ' (' + extractError(e) + '). Check your connection.'); }
+    if (!r.ok) throw new Error(await httpErrorText(r, name));
+    const reader = r.body.getReader(), dec = new TextDecoder();
+    let buf = '';
+    while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let i;
+        while ((i = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, i).trim();
+            buf = buf.slice(i + 1);
+            if (line.indexOf('data:') !== 0) continue;
+            const d = line.slice(5).trim();
+            if (d === '[DONE]') return;
+            let j = null;
+            try { j = JSON.parse(d); } catch (e) { continue; }
+            if (j.error) throw new Error(name + ': ' + (j.error.message || JSON.stringify(j.error)));
+            const delta = j.choices && j.choices[0] && j.choices[0].delta;
+            if (delta && typeof delta.content === 'string' && delta.content) yield { type: 'text', text: delta.content };
+        }
+    }
+}
+function callModel(msgs, options) {
+    if (isExt(currentModel)) { const e = parseExt(currentModel); return streamExternal(e.pid, e.id, msgs); }
+    return puter.ai.chat(msgs, options);
+}
+
+// ---------------------------------------------------------------- picker UI
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function closeModelPicker() {
+    if (mpEl) { mpEl.remove(); mpEl = null; mp.open = false; return true; }
+    return false;
+}
+function openModelPicker() {
+    closeModelPicker();
+    mp.open = true; mp.query = '';
+    mpEl = el('div', 'mp-overlay');
+    mpEl.addEventListener('click', e => { if (e.target === mpEl) closeModelPicker(); });
+    renderPicker();
+    document.body.appendChild(mpEl);
+    Object.keys(PROVIDERS).forEach(pid => {
+        if (getKey(pid) && !mp.lists[pid] && !mp.loading[pid]) loadProvider(pid);
+    });
+}
+async function loadProvider(pid) {
+    mp.loading[pid] = true; mp.errors[pid] = '';
+    if (mp.open) renderPicker();
+    try { mp.lists[pid] = await fetchProviderModels(pid); }
+    catch (e) { mp.errors[pid] = extractError(e); }
+    mp.loading[pid] = false;
+    if (mp.open) renderPicker();
+}
+async function loadPuterList() {
+    mp.puterLoading = true; mp.puterError = '';
+    renderPicker();
+    try { mp.puter = await loadPuterOpenModels(); }
+    catch (e) { mp.puterError = extractError(e); }
+    mp.puterLoading = false;
+    if (mp.open) renderPicker();
+}
+function setProviderKey(pid) {
+    if (pid === 'custom') {
+        const cur = providerKeys.custom || {};
+        const base = prompt('Base URL of your OpenAI-compatible API (ends in /v1)', cur.base || 'https://');
+        if (base === null) return;
+        const key = prompt('API key (leave empty if none)', cur.key || '');
+        if (key === null) return;
+        providerKeys.custom = { base: base.trim(), key: key.trim() };
+    } else {
+        const v = prompt('Paste your ' + PROVIDERS[pid].name + ' API key (get one at ' + PROVIDERS[pid].keyUrl + ')', getKey(pid) || '');
+        if (v === null) return;
+        if (v.trim()) providerKeys[pid] = v.trim(); else delete providerKeys[pid];
+    }
+    saveKeys();
+    delete mp.lists[pid];
+    if (getKey(pid) || (pid === 'custom' && providerBase('custom'))) loadProvider(pid); else renderPicker();
+}
+function removeProviderKey(pid) {
+    delete providerKeys[pid]; saveKeys(); delete mp.lists[pid]; mp.errors[pid] = '';
+    if (currentModel.indexOf('ext:' + pid + ':') === 0) selectModel(availableModels[0].apiName);
+    else renderPicker();
+}
+function rowFor(id, name, meta) {
+    const b = el('button', 'mp-row' + (id === currentModel ? ' sel' : ''));
+    b.type = 'button';
+    b.appendChild(el('span', 'nm', name));
+    if (meta) b.appendChild(el('span', 'meta', meta));
+    b.addEventListener('click', () => selectModel(id, name));
+    return b;
+}
+function renderPicker() {
+    if (!mpEl) return;
+    const q = mp.query.trim().toLowerCase();
+    const match = s => !q || String(s).toLowerCase().indexOf(q) !== -1;
+    mpEl.innerHTML = '';
+    const sheet = el('div', 'mp-sheet');
+    const head = el('div', 'mp-head');
+    head.appendChild(el('span', '', 'Choose model'));
+    const x = el('button', 'artifact-btn', '\u2715'); x.type = 'button'; x.addEventListener('click', closeModelPicker);
+    head.appendChild(x);
+    sheet.appendChild(head);
+    const search = el('input', 'mp-search');
+    search.type = 'text'; search.placeholder = 'Search models\u2026'; search.value = mp.query;
+    search.addEventListener('input', () => { mp.query = search.value; const pos = search.selectionStart; renderPicker(); const s2 = mpEl && mpEl.querySelector('.mp-search'); if (s2) { s2.focus(); try { s2.setSelectionRange(pos, pos); } catch (e) {} } });
+    sheet.appendChild(search);
+    const body = el('div', 'mp-body');
+
+    // Claude
+    body.appendChild(el('div', 'mp-sec', 'Claude \u00b7 uses your Puter credits'));
+    availableModels.filter(m => match(m.displayName + ' ' + m.apiName)).forEach(m => body.appendChild(rowFor(m.apiName, m.displayName, m.apiName)));
+
+    // Free providers
+    body.appendChild(el('div', 'mp-sec', 'Free & fast \u00b7 your own API key (no Puter credits)'));
+    Object.keys(PROVIDERS).forEach(pid => {
+        const P = PROVIDERS[pid];
+        const hasKey = pid === 'custom' ? !!providerBase('custom') : !!getKey(pid);
+        const box = el('div', 'mp-prov');
+        const top = el('div', 'mp-prov-top');
+        top.appendChild(el('span', 'pn', P.name + (hasKey ? '  \u2713' : '')));
+        const btns = el('span', 'pb');
+        const set = el('button', 'artifact-btn', hasKey ? 'Change key' : (pid === 'custom' ? 'Set up' : 'Add key')); set.type = 'button';
+        set.addEventListener('click', () => setProviderKey(pid)); btns.appendChild(set);
+        if (hasKey) {
+            const rm = el('button', 'artifact-btn', 'Remove'); rm.type = 'button';
+            rm.addEventListener('click', () => removeProviderKey(pid)); btns.appendChild(rm);
+        }
+        top.appendChild(btns);
+        box.appendChild(top);
+        box.appendChild(el('div', 'mp-note', P.note + (P.keyUrl ? ' Key: ' + P.keyUrl : '')));
+        if (mp.loading[pid]) box.appendChild(el('div', 'mp-note', 'Loading models\u2026'));
+        if (mp.errors[pid]) { const er = el('div', 'mp-note', mp.errors[pid]); er.style.color = '#ff8a8a'; box.appendChild(er); }
+        if (hasKey && !mp.lists[pid] && !mp.loading[pid] && !mp.errors[pid]) {
+            const ld = el('button', 'artifact-btn', 'Load models'); ld.type = 'button'; ld.addEventListener('click', () => loadProvider(pid)); box.appendChild(ld);
+        }
+        (mp.lists[pid] || []).filter(m => match(m.name + ' ' + m.id)).forEach(m => {
+            box.appendChild(rowFor('ext:' + pid + ':' + m.id, m.name, m.id + (m.ctx ? ' \u00b7 ' + Math.round(m.ctx / 1000) + 'k context' : '')));
+        });
+        if (mp.lists[pid] && !mp.lists[pid].length) box.appendChild(el('div', 'mp-note', 'No models returned.'));
+        body.appendChild(box);
+    });
+
+    // Puter open-source
+    body.appendChild(el('div', 'mp-sec', 'Open-source via Puter \u00b7 uses Puter credits (cheaper)'));
+    const pbox = el('div', 'mp-prov');
+    pbox.appendChild(el('div', 'mp-note', 'Prices are per 1M tokens (input / output). These need Puter credits, so they will not work while your monthly credits are used up.'));
+    if (mp.puterLoading) pbox.appendChild(el('div', 'mp-note', 'Loading\u2026'));
+    if (mp.puterError) { const er = el('div', 'mp-note', mp.puterError); er.style.color = '#ff8a8a'; pbox.appendChild(er); }
+    if (!mp.puter && !mp.puterLoading) {
+        const ld = el('button', 'artifact-btn', 'Load open-source models'); ld.type = 'button'; ld.addEventListener('click', loadPuterList); pbox.appendChild(ld);
+    }
+    (mp.puter || []).filter(m => match(m.name + ' ' + m.id)).slice(0, 80).forEach(m => {
+        const price = m.hasCost ? money(m.inM) + ' / ' + money(m.outM) : 'price n/a';
+        pbox.appendChild(rowFor(m.id, m.name, price + (m.ctx ? ' \u00b7 ' + Math.round(m.ctx / 1000) + 'k context' : '')));
+    });
+    body.appendChild(pbox);
+    body.appendChild(el('div', 'mp-note', 'API keys are stored only on this phone.'));
+    sheet.appendChild(body);
+    mpEl.appendChild(sheet);
+}
+
+// close the picker with the Android back button first
+const _prevBack = window.__handleBack;
+window.__handleBack = function () { if (closeModelPicker()) return true; return _prevBack ? _prevBack() : false; };
+
+document.addEventListener('DOMContentLoaded', function () {
+    loadModelPrefs();
+    if (modelPrefs.last) { currentModel = modelPrefs.last; }
+    updateModelDisplay();
 });
 
     </script>
