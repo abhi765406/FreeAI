@@ -28,3 +28,12 @@ Tap the paperclip next to the message box.
 - Word (.docx): text is extracted
 - Text/code/CSV/JSON/etc.: sent as text
 Limits: 8 files per message, PDF 25 MB, zip 60 MB, long text is truncated.
+
+## v1.3 features
+- **Markdown** replies (headings, lists, tables, bold, links).
+- **Download all (.zip):** shown when a reply has 2+ named files. Files go to your Downloads folder (Android 10+).
+- **Live preview:** HTML/SVG code cards get a Preview button (runs in a sandbox) plus full screen. Multi-file web projects (index.html + style.css + app.js) are stitched together automatically.
+- **Web search:** toggle "Web search" above the message box. Claude calls a search tool; the app runs it through Puter's OpenAI web-search model and gives the result back to Claude. If tools are rejected, it answers without search.
+- **Saved chats:** stored on the phone, survive closing the app, delete with the x in the side menu (last 50 chats).
+- **Documents:** ask for a Word / Excel / PDF file. Word and Excel are generated in the app. PDF opens Android's print dialog: choose "Save as PDF".
+- Back button closes full-screen preview / side menu before leaving the app.
