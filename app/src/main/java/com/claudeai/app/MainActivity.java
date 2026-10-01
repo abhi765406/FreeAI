@@ -442,6 +442,22 @@ public class MainActivity extends Activity {
             closePopup();
             return;
         }
+        if (web == null) {
+            super.onBackPressed();
+            return;
+        }
+        // Let the page close its own overlays first (full-screen preview, side menu).
+        web.evaluateJavascript(
+                "(function(){try{return window.__handleBack&&window.__handleBack()?'1':'0';}catch(e){return '0';}})()",
+                new ValueCallback<String>() {
+                    @Override
+                    public void onReceiveValue(String value) {
+                        if (!"\"1\"".equals(value)) defaultBack();
+                    }
+                });
+    }
+
+    private void defaultBack() {
         if (web != null && web.canGoBack()) {
             web.goBack();
             return;
